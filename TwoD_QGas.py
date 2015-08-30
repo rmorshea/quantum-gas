@@ -1,16 +1,16 @@
 
 # coding: utf-8
 
-# In[7]:
+# In[2]:
 
 import numpy as np
-import scipy 
+import scipy
 import scipy.signal
 import random
 import numpy.fft
 import matplotlib.pyplot as plt
-exp = np.exp
-arange = np.arange
+exp=np.exp
+arange=np.arange
 
 class Particle(object):
     
@@ -23,7 +23,7 @@ class Particle(object):
         self.bell_state_time=bell_state_time
 
 
-# In[8]:
+# In[4]:
 
 class Gas(list):
     def __init__(self, y_length, x_length, Temperature):
@@ -951,6 +951,120 @@ class Gas(list):
             for p in range(self.x_length()):
                 if self[k][p].pairing != None:
                     self[k][p].bell_state_time+=1
+    
+    
+    def Decoherence_2(self, tau, Interaction):
+        for i in range(self.y_length()):
+            for j in range(self.x_length()):
+                if self[i][j].pairing!=None:
+                    r=random.random()
+                    if Interaction=='Ising' or Interaction=='Ising Bell State' or Interaction=='Ising and Bell State':
+                        if i==0:
+                            top=self[self.y_length()-1][j].state
+                        else:
+                            top=self[i-1][j].state
+                        if i==(self.y_length()-1):
+                            bottom=self[0][j].state
+                        else:
+                            bottom=self[i+1][j].state
+                        if j==0:
+                            left=self[i][self.x_length()-1].state
+                        else:
+                            left=self[i][j-1].state
+                        if j==(self.x_length()-1):
+                            right=self[i][0].state
+                        else:
+                            right=self[i][j+1].state
+                        E_up=(-1*1)*(top+bottom+left+right)
+                        E_down=(-1*-1)*(top+bottom+left+right)
+                    elif Interaction=='Baseline' or Interaction=='Bell State' or Interactions=='Bell and Baseline':
+                        M=self.Magnitization()
+                        M_up=M+1
+                        M_down=M-1
+                        E_up=M_up*1
+                        E_down=M_down*(-1)
+                    if r<(1.-exp((-1.*self[i][j].bell_state_time)/tau)):
+                        prob=random.random()
+                        if self[i][j].bell_state==1 or self[i][j].bell_state==2:
+                            if E_up<E_down:
+                                self[i][j].state=1
+                                self[i][j].bell_state=None
+                                self[i][j].bell_state_time=None
+                                self[i][j].pairing.state=-1
+                                self[i][j].pairing.bell_state=None
+                                self[i][j].pairing.bell_state_time=None
+                                self[i][j].pairing.pairing=None
+                                self[i][j].pairing=None
+                            elif E_up>E_down:
+                                self[i][j].state=-1
+                                self[i][j].bell_state=None
+                                self[i][j].bell_state_time=None
+                                self[i][j].pairing.state=1
+                                self[i][j].pairing.bell_state=None
+                                self[i][j].pairing.bell_state_time=None
+                                self[i][j].pairing.pairing=None
+                                self[i][j].pairing=None
+                            else:
+                                if prob<=0.5:
+                                    self[i][j].state=1
+                                    self[i][j].bell_state=None
+                                    self[i][j].bell_state_time=None
+                                    self[i][j].pairing.state=-1
+                                    self[i][j].pairing.bell_state=None
+                                    self[i][j].pairing.bell_state_time=None
+                                    self[i][j].pairing.pairing=None
+                                    self[i][j].pairing=None
+                                else:
+                                    self[i][j].state=-1
+                                    self[i][j].bell_state=None
+                                    self[i][j].bell_state_time=None
+                                    self[i][j].pairing.state=1
+                                    self[i][j].pairing.bell_state=None
+                                    self[i][j].pairing.bell_state_time=None
+                                    self[i][j].pairing.pairing=None
+                                    self[i][j].pairing=None
+                        elif self[i][j].bell_state==3 or self[i][j].bell_state==4:
+                            if E_up<E_down:
+                                self[i][j].state=1
+                                self[i][j].bell_state=None
+                                self[i][j].bell_state_time=None
+                                self[i][j].pairing.state=1
+                                self[i][j].pairing.bell_state=None
+                                self[i][j].pairing.bell_state_time=None
+                                self[i][j].pairing.pairing=None
+                                self[i][j].pairing=None
+                            elif E_up>E_down:
+                                self[i][j].state=-1
+                                self[i][j].bell_state=None
+                                self[i][j].bell_state_time=None
+                                self[i][j].pairing.state=-1
+                                self[i][j].pairing.bell_state=None
+                                self[i][j].pairing.bell_state_time=None
+                                self[i][j].pairing.pairing=None
+                                self[i][j].pairing=None
+                            else:
+                                if prob<=0.5:
+                                    self[i][j].state=1
+                                    self[i][j].bell_state=None
+                                    self[i][j].bell_state_time=None
+                                    self[i][j].pairing.state=1
+                                    self[i][j].pairing.bell_state=None
+                                    self[i][j].pairing.bell_state_time=None
+                                    self[i][j].pairing.pairing=None
+                                    self[i][j].pairing=None
+                                else:
+                                    self[i][j].state=-1
+                                    self[i][j].bell_state=None
+                                    self[i][j].bell_state_time=None
+                                    self[i][j].pairing.state=-1
+                                    self[i][j].pairing.bell_state=None
+                                    self[i][j].pairing.bell_state_time=None
+                                    self[i][j].pairing.pairing=None
+                                    self[i][j].pairing=None
+        for k in range(self.y_length()):
+            for p in range(self.x_length()):
+                if self[k][p].pairing != None:
+                    self[k][p].bell_state_time+=1
         
 
     def Correlation(self):
@@ -989,7 +1103,7 @@ class Gas(list):
         
 
 
-# In[9]:
+# In[3]:
 
 import sys
 
@@ -1011,9 +1125,9 @@ class ProgressBar(object):
      #pb.printout(float(i)/100000)
 
 
-# In[21]:
+# In[8]:
 
-def Iterate(N, max_vel_temp, tau, Interaction, Movement=None, Decoherence='Yes', input_gas=None, gas_shape=None, Temperature=None, Seed_Bell_States=None, Number_Seeded_Bell_States=None):
+def Iterate(N, max_vel_temp, tau, Interaction, Movement=None, Decoherence='Yes', Decoherence_type=2, input_gas=None, gas_shape=None, Temperature=None, Seed_Bell_States=None, Number_Seeded_Bell_States=None):
     #Iteration function. Parameters:
     #N is number of iterations
     #gas_shape is shape of gas given in tuple [y_length, x_length]
@@ -1112,33 +1226,48 @@ def Iterate(N, max_vel_temp, tau, Interaction, Movement=None, Decoherence='Yes',
         elif Interaction=='Ising Bell State':
             g.Bell_State_interaction('Use Ising Energy')
             if Decoherence=='Yes':
-                g.Decoherence(tau)
+                if Decoherence_type==1:
+                    g.Decoherence(tau)
+                elif Decoherence_type==2:
+                    g.Decoherence_2(tau, Interaction)
             if Movement=='yes':
                 g.move(max_vel_temp)
         elif Interaction=='Ising and Bell State':
             g.Bell_State_interaction('Use Ising Energy')
             g.Ising_interaction()
             if Decoherence=='Yes':
-                g.Decoherence(tau)
+                if Decoherence_type==1:
+                    g.Decoherence(tau)
+                elif Decoherence_type==2:
+                    g.Decoherence_2(tau,Interaction)
             if Movement=='yes':
                 g.move(max_vel_temp)
         elif Interaction=='Baseline':
             g.Baseline_interaction()
             if Decoherence=='Yes':
-                g.Decoherence(tau)
+                if Decoherence_type==1:
+                    g.Decoherence(tau)
+                elif Decoherence_type==2:
+                    g.Decoherence_2(tau, Interaction)
             if Movement=='yes':
                 g.move(max_vel_temp)
         elif Interaction=='Bell State':
             g.Bell_State_interaction()
             if Decoherence=='Yes':
-                g.Decoherence(tau)
+                if Decoherence_type==1:
+                    g.Decoherence(tau)
+                elif Decoherence_type==2:
+                    g.Decoherence_2(tau,Interaction)
             if Movement=='yes':
                 g.move(max_vel_temp)
         elif Interaction=='Bell and Baseline':
             g.Bell_State_interaction()
             g.Baseline_interaction()
             if Decoherence=='Yes':
-                g.Decoherence(tau)
+                if Decoherence_type==1:
+                    g.Decoherence(tau)
+                elif Dechoerence_type==2:
+                    g.Decoherence_2(tau,Interaction)
             if Movement=='yes':
                 g.move(max_vel_temp)
         I[i]=i
@@ -1155,7 +1284,7 @@ def Iterate(N, max_vel_temp, tau, Interaction, Movement=None, Decoherence='Yes',
     return g, I, E, E_2, M, M_2, ED
 
 
-def Temperature_Iteration(T_i, T_f, N_Temps, N, max_vel_temp, tau, Interaction, Movement=None, Decoherence='Yes', gas_in=None, gas_shape=None, Temperature=None, Seed_Bell_States=None, Number_Seeded_Bell_States=None, Extra_Iteration=None, Extra_iteration_num=None):
+def Temperature_Iteration(T_i, T_f, N_Temps, N, max_vel_temp, tau, Interaction, Movement=None, Decoherence='Yes', Decoherence_type=2, gas_in=None, gas_shape=None, Temperature=None, Seed_Bell_States=None, Number_Seeded_Bell_States=None, Extra_Iteration=None, Extra_iteration_num=None):
     #Temperature iteration function
     # T_i=inital temperature, T_f=final temperature, N_Temps is number if temperatures between T_i and T_f
     # all other arguments are the relevent arguments in the Iterate function
@@ -1261,7 +1390,7 @@ def Temperature_Iteration(T_i, T_f, N_Temps, N, max_vel_temp, tau, Interaction, 
         g_in.Temperature=T[i]
         if Extra_Iteration=='Yes':
             g_in,a,b,c,d,e,f=Iterate(Extra_iteration_num,max_vel_temp,tau,Interaction,input_gas=g_in)
-        g_out,I,EI,E_2I,MI,M_2I,EDI=Iterate(N,max_vel_temp,tau,Interaction,Movement=Movement,Decoherence=Decoherence, input_gas=g_in)
+        g_out,I,EI,E_2I,MI,M_2I,EDI=Iterate(N,max_vel_temp,tau,Interaction,Movement=Movement,Decoherence=Decoherence, Decoherence_type=Decoherence_type, input_gas=g_in)
         E[i]=np.average(EI)
         CV[i]=(1./((float(T[i]))**2.))*(np.average(E_2I)-((np.average(EI))**2.))
         M[i]=np.average(MI)
@@ -1273,7 +1402,7 @@ def Temperature_Iteration(T_i, T_f, N_Temps, N, max_vel_temp, tau, Interaction, 
     return g_in, T, E, CV, M, Chi, ED
 
 
-# In[16]:
+# In[9]:
 
 def sym_derivative(x,y,smooth=None):
     #if smooth=='yes':
