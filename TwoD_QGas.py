@@ -1,33 +1,122 @@
+import sys
+
 import random
 
 import scipy
 import scipy.signal
 
 import numpy.fft
-import matplotlib.pyplot as plt
 
 import numpy as np
 from numpy import exp,arange
 
 
-# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
 
 class Particle(object):
     
-    def __init__(self,index,state,position):
-        self.index = index
+    def __init__(self, state):
         self.state = state
-        self.position = position
         self.pairing = None
         self.bell_state = None
-        self.bell_state_time = None
+        self.bell_state_times = None
+        self.limbdo = False
 
 
-# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# General Utilities - - - - - - - - - - - - - - - - - - -
+
+def binit(value, bins):
+    """return the bin index of the value"""
+    for i in range(len(bins)):
+        if value>bins[i]:
+            return i-1
+    return i
+
+class ProgressBar(object):
+    
+    def __init__(self, length=20):
+        self.length = length
+        self.current = None
+        
+    def printout(self, percent):
+        bar = "="*int(round(percent*self.length))
+        if self.current!=bar:
+            form = "\r[%-"+str(self.length)+"s]"
+            sys.stdout.write(form % bar)
+            sys.stdout.flush()
+            self.current = bar
+
+class radial_gridspace_factory(type):
+    
+    _orthogonals = ((1,1),(-1,1),(-1,-1),(1,-1))
+
+    @classmethod
+    def _gen_orths(cls, i, j):
+        return [(i*o[0],j*o[1]) for o in cls._orthogonals]
+    
+    def __new__(meta, *space):
+        if len(space)>2:
+            raise ValueError('only supports 2D spaces')
+        grid_shape = range(space[0]),range(space[1])
+        x,y = np.meshgrid(*grid_shape,sparse=True)
+
+        grid = x**2+y**2
+        indices = {0:[(0,0)]}
+        for j in range(1,grid.shape[1]):
+            for i in range(0,grid.shape[0]):
+                if indices.get(grid[i][j],None):
+                    for n,m in meta._gen_orths(i,j):
+                        indices[grid[i][j]].append((n,m))
+                else:
+                    indices[grid[i][j]] = meta._gen_orths(i,j)
+        rads = sorted(indices.keys())
+        return type('radial_gridspace',
+                    (radial_gridspace_template,object),
+                    {'indices':indices,'rads':rads})
+        
+class radial_gridspace_template:
+    
+    def __init__(self, *origin):
+        if len(origin)>2:
+            raise ValueError('only supports 2D indices')
+        if len(origin)==0:
+            origin = (0,0)
+        self.origin = origin
+        
+    def __iter__(self):
+        self.i = 0
+        return self
+
+    def __getitem__(self, index):
+        o = self.origin
+        r = self.rads[index]
+        g = self.indices[r]
+        return [(p[0]-o[0],p[1]-o[1]) for p in g]
+    
+    def next(self):
+        try:
+            r = self.rads[self.i]
+        except IndexError:
+            raise StopIteration
+        self.i += 1
+        return self.indices[r]
+
+class EmptyGas(object):
+
+    def __init__(self, x, y):
+        self.particles = tuple(None for n in range(x*y))
+
+    def __getitem__(self, key):
+        return self.particles[key:(key+1)*self.shape[0]]
 
 
-def _free_pairing(chosen, other, r=random.random()):
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Entanglement Utilities  - - - - - - - - - - - - - - - -
+
+def _free_pairing(chosen, other):
+    r=random.random()
 
     chosen.pairing = other
     other.pairing = chosen
@@ -50,17 +139,17 @@ def _free_pairing(chosen, other, r=random.random()):
         chosen.bell_state = 4
         other.bell_state = 4
 
-def _entangled_pairing(unpaired, paired, partner, r=random.random()):
-    unpaired.pairing = paired
-    paired.pairing = unpaired
-    partner.pairing = None
+def _entangled_pairing(unpaired, paired, partner):
+    r=random.random()
+
+    paired.state = 0
+    paired.bell_state_time = 0
+
+    partner.bell_state = None
+    partner.bell_state_time = 0
 
     unpaired.state = 0
-    paired.state = 0
-    partner.bell_state = None
     unpaired.bell_state_time = 0
-    paired.bell_state_time = 0
-    partner.bell_state_time = 0
 
     if paired.bell_state in (1,2):
         flip = 1
@@ -84,23 +173,22 @@ def _entangled_pairing(unpaired, paired, partner, r=random.random()):
         unpaired.bell_state = 4
         paired.bell_state = 4
 
-def _double_entangled_pairing(paireds, partners):
-    r = random.random()
-    _free_pairing(*paireds, r=r)
-    _free_pairing(*partners, r=r)
+    unpaired.pairing = paired
+    paired.pairing = unpaired
+    partner.pairing = None
 
-def _break_entanglement(chosen, rule):
-    s = (1 if rule() else -1)
+def _double_entangled_pairing(paireds, partners):
+    _free_pairing(*paireds)
+    _free_pairing(*partners)
+
+def _break_entanglement(chosen, new_state):
 
     if chosen.bell_state in (1,2):
-        chosen.state = s
-        chosen.pairing.state = -s
+        chosen.state = new_state
+        chosen.pairing.state = -new_state
     elif chosen.bell_state in (3,4):
-        chosen.state = s
-        chosen.pairing.state = s
-
-    chosen.state = 1
-    chosen.pairing.state = -1
+        chosen.state = new_state
+        chosen.pairing.state = new_state
 
     chosen.bell_state = None
     chosen.bell_state_time = None
@@ -112,44 +200,39 @@ def _break_entanglement(chosen, rule):
     chosen.pairing = None
 
 
-# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# QuantumGas Class  - - - - - - - - - - - - - - - - - - -
 
 
 class QuantumGas(object):
 
-    def __init__(self, y, x, temp):
+    def __init__(self, x, y, temp):
         self.temp = temp
         self.shape = (x,y)
         self.area = x*y
-        space = np.ndenumerate(np.array([range(x),range(y)]))
-        self.particles = [Particle(v,random.choice([-1,1]),i) for i,v in space]
+        state_gen = lambda : random.choice((-1,1))
+        self.particles = tuple(Particle(state_gen()) for i in range(x*y))
+        # high upfront computation cost, but essentailly none afterwards.
+        self.radial_gridspace_type = radial_gridspace_factory(x,y)
 
     def __getitem__(self, key):
         return self.particles[key:(key+1)*self.shape[0]]
     
     @property
-    def indexes(self):
-        return np.array(p.index for p in self.particles)
-    
-    @property
     def pairings(self):
-        return np.array(p.pairing for p in self.particles)
+        return np.array([p.pairing for p in self.particles])
     
     @property
     def states(self):
-        return np.array(p.state for p in self.particles)
-
-    @property    
-    def positions(self):
-        return np.array(p.position for p in self.particles)
+        return np.array([p.state for p in self.particles])
 
     @property    
     def bell_states(self):
-        return np.array(p.bell_state for p in self.particles)
+        return np.array([p.bell_state for p in self.particles])
     
     @property
     def bell_state_times(self):
-        return np.array(p.bell_state_times for p in self.particles)
+        return np.array([p.bell_state_times for p in self.particles])
 
     @property      
     def magnitization(self):
@@ -173,8 +256,206 @@ class QuantumGas(object):
         
         return (-1*Energy)
 
-    # can put back later...
-    # def move(self, max_vel_temp):
+    def move(self, max_vel_temp):
+        xlim, ylim = self.shape
+        gas_template = EmptyGas(*self.shape)
+
+        for i in range(self.shape[1]):
+            for j in range(self.shape[0]):
+                radial_gridspace = self.radial_gridspace_type(0,0)
+                gauss_mu = self.shape[1]*(1.-exp(-self.temp/max_vel_temp))
+                gauss_sigma = self.shape[1]*(1.-exp(-self.temp/max_vel_temp))/2.
+                gnum = abs(random.gauss(guass_mu, gauss_sigma))
+                # velocity is binned into a radius groups, based
+                # on the allowed distances in `radial_gridspace`
+                velocity = binit(gnum, griderator.rads.keys())
+                
+                if velocity>0:
+                    # velocity now corrispods to a particular
+                    # set of points with identical radii
+                    rgroup = radial_gridspace[velocity]
+                    diff = random.choice(rgroup)
+                    
+                    direction = random.random()
+                    if direction<=0.5:
+                        #print(velocity)
+                        
+                        if direction > 0.25 and direction <= 0.5:
+                            if velocity > (self.x_length()-j-1):
+                                for m in range(velocity-(self.x_length()-j),-1,-1):
+                                    if new[i][m].index=='empty':
+                                        new[i][m]=self[i][j]
+                                        moved='yes'
+                                        break
+                                if moved=='no':
+                                    for m in range(self.x_length()-1,j-1,-1):
+                                        if new[i][m].index=='empty':
+                                            new[i][m]=self[i][j]
+                                            moved='yes'
+                                            break
+                                    if moved=='no':
+                                        for k in range(self.y_length()):
+                                            for p in range(self.x_length()):
+                                                if new[k][p].index=='empty':
+                                                    new[k][p]=self[i][j]
+                                                    moved='yes'
+                                                    break
+                                            if moved=='yes':
+                                                break
+                                    
+                            else:
+                                for m in range(j+velocity,j-1,-1):
+                                    if new[i][m].index=='empty':
+                                        new[i][m]=self[i][j]
+                                        moved='yes'
+                                        break
+                        
+                                if moved=='no':
+                                    for k in range(self.y_length()):
+                                        for p in range(self.x_length()):
+                                            if new[k][p].index=='empty':
+                                                new[k][p]=self[i][j]
+                                                moved='yes'
+                                                break
+                                        if moved=='yes':
+                                            break
+                                            
+                        elif direction <= 0.25:
+                            if velocity > j:
+                                for m in range(self.x_length()-(velocity-j),self.x_length()):
+                                    if new[i][m].index=='empty':
+                                        new[i][m]=self[i][j]
+                                        moved='yes'
+                                        break
+                                if moved=='no':
+                                    for m in range(0,j+1):
+                                        if new[i][m].index=='empty':
+                                            new[i][m]=self[i][j]
+                                            moved='yes'
+                                            break
+                                    if moved=='no':
+                                        for k in range(self.y_length()):
+                                            for p in range(self.x_length()):
+                                                if new[k][p].index=='empty':
+                                                    new[k][p]=self[i][j]
+                                                    moved='yes'
+                                                    break
+                                            if moved=='yes':
+                                                break
+                                    
+                            else:
+                                for m in range(j-velocity,j+1):
+                                    if new[i][m].index=='empty':
+                                        new[i][m]=self[i][j]
+                                        moved='yes'
+                                        break
+                                if moved=='no':
+                                    for k in range(self.y_length()):
+                                        for p in range(self.x_length()):
+                                            if new[k][p].index=='empty':
+                                                new[k][p]=self[i][j]
+                                                moved='yes'
+                                                break
+                                        if moved=='yes':
+                                            break
+                                                
+                    elif direction > 0.5:
+                        if velocity > vmax_y:
+                            velocity = vmax_y
+                        #print(velocity)
+                        
+                        if direction > 0.75:
+                            if velocity > (self.y_length()-i-1):
+                                for m in range(velocity-(self.y_length()-i),-1,-1):
+                                    if new[m][j].index=='empty':
+                                        new[m][j]=self[i][j]
+                                        moved='yes'
+                                        break
+                                if moved=='no':
+                                    for m in range(self.y_length()-1,i-1,-1):
+                                        if new[m][j].index=='empty':
+                                            new[m][j]=self[i][j]
+                                            moved='yes'
+                                            break
+                                    if moved=='no':
+                                        for k in range(self.y_length()):
+                                            for p in range(self.x_length()):
+                                                if new[k][p].index=='empty':
+                                                    new[k][p]=self[i][j]
+                                                    moved='yes'
+                                                    break
+                                            if moved=='yes':
+                                                break
+                                    
+                            else:
+                                for m in range(i+velocity,i,-1):
+                                    if new[m][j].index=='empty':
+                                        new[m][j]=self[i][j]
+                                        moved='yes'
+                                        break
+                        
+                                if moved=='no':
+                                    for k in range(self.y_length()):
+                                        for p in range(self.x_length()):
+                                            if new[k][p].index=='empty':
+                                                new[k][p]=self[i][j]
+                                                moved='yes'
+                                                break
+                                        if moved=='yes':
+                                            break
+                                                
+                        elif direction > 0.5 and direction <=0.75:
+                            if velocity > i:
+                                for m in range(self.y_length()-(velocity-i),self.y_length()+1):
+                                    if new[m][j].index=='empty':
+                                        new[m][j]=self[i][j]
+                                        moved='yes'
+                                        break
+                                if moved=='no':
+                                    for m in range(0,i+1):
+                                        if new[m][j].index=='empty':
+                                            new[m][j]=self[i][j]
+                                            moved='yes'
+                                            break
+                                    if moved=='no':
+                                        for k in range(self.y_length()):
+                                            for p in range(self.x_length()):
+                                                if new[k][p].index=='empty':
+                                                    new[k][p]=self[i][j]
+                                                    moved='yes'
+                                                    break
+                                            if moved=='yes':
+                                                break
+                                    
+                            else:
+                                for m in range(i-velocity,i+1):
+                                    if new[m][j].index=='empty':
+                                        new[m][j]=self[i][j]
+                                        moved='yes'
+                                        break
+                                if moved=='no':
+                                    for k in range(self.y_length()):
+                                        for p in range(self.x_length()):
+                                            if new[k][p].index=='empty':
+                                                new[k][p]=self[i][j]
+                                                moved='yes'
+                                                break
+                                        if moved=='yes':
+                                            break
+
+                moved = False
+                griderator.origin = (i,j)
+                for rgroup in griderator:
+                    for n,m in random.shuffle(rgroup):
+                        if 0<n<self.shape[0] and 0<m<self.shape[1]:
+                            if gas_template[n][m] is None:
+                                gas_template[n][m] = self[i][j]
+                                moved = True
+                                break
+                    if moved:
+                        break
+                                        
+        self.particles = gas_template.particles
 
     def _get_neighbor_indeces(self, i, j, directions='tblr'):
         """iterate over indeces of the neighbors i,j
@@ -229,7 +510,7 @@ class QuantumGas(object):
                     E += (p1.state*p2.state) + (p1.state*p3.state)
 
                 elif i!=0 and j==(self.shape[0]-1):
-                    p1, p2, p3 = self[i][j], self[i-1][j], state*self[i][0]
+                    p1, p2, p3 = self[i][j], self[i-1][j], self[i][0]
                     E += (p1.state*p2.state) + (p1.state*p3.state)
         return -1*E
 
@@ -237,6 +518,7 @@ class QuantumGas(object):
         T = float(self.temp)
         i = random.randint(0,self.shape[1]-1)
         j = random.randint(0,self.shape[0]-1)
+
         DE = self.ising_diffeq(i,j)
         prob = random.random()
         if DE<=0:
@@ -323,7 +605,7 @@ class QuantumGas(object):
         choice_list = ['right','top','left','bottom']
 
         c = random.choice((0,1,2,3))
-        direciton = choice_list[c]
+        direction = choice_list[c]
         k,p = indeces[c]
 
         if ising_energy=='Use Ising Energy':
@@ -343,24 +625,29 @@ class QuantumGas(object):
         
         elif bool(chosen.pairing) != bool(other.pairing):
             partner = chosen.pairing or other.pairing
+
+            if chosen.pairing:
+                paired = chosen
+                unpaired = other
+            else:
+                paired = other
+                unpaired = chosen
+
             r = random.random()
             if DE<=0:
-                ps = (chosen, other, partner)
+                ps = (unpaired, paired, partner)
                 _entangled_pairing(*ps)
             elif random.random()<np.exp((-1*DE)/T):
-                ps = (chosen, other, partner)
+                ps = (unpaired, paired, partner)
                 _entangled_pairing(*ps)
-                    
-        elif chosen.pairing and other.pairing:
+
+        else:
             r = random.random()
-            if DE<=0:
-                paireds = (other, chosen)
-                partners = (chosen.pairing, other.pairing)
-                _double_entangled_pairing(paireds, partners)
-            elif random.random()<np.exp((-1*DE)/T):
-                paireds = (other, chosen)
-                partners = (chosen.pairing, other.pairing)
-                _double_entangled_pairing(paireds, partners)
+            if DE!=0:
+                raise ValueError('DE should always be 0')
+            paireds = (other, chosen)
+            partners = (chosen.pairing, other.pairing)
+            _double_entangled_pairing(paireds, partners)
 
     def entanglement_density(self):
         count = 0
@@ -386,7 +673,7 @@ class QuantumGas(object):
     def _energy_definition(self, interaction_type):
         if interaction_type in ('Ising','Ising Bell State','Ising and Bell State'):
             return self._state_sum_energy
-        elif interaction_type in ('Baseline','Bell State','Bell and Baseline':
+        elif interaction_type in ('Baseline','Bell State','Bell and Baseline'):
             return _magnitization_energy
 
 
@@ -407,15 +694,6 @@ class QuantumGas(object):
 
     def decoherence_2(self, tau, interaction_type):
         energy_calculator = self._energy_definition(interaction_type)
-
-        decohere_by_random = lambda : random.random()<=0.5
-
-        class decohere_by_energy(object):
-            def __init__(E_up,E_down):
-                self.E_up = E_up
-                self.E_down = E_down
-            def __call__():
-                return self.E_up<self.E_down
         
         for i in range(self.shape[1]):
             for j in range(self.shape[0]):
@@ -425,35 +703,16 @@ class QuantumGas(object):
 
                         E_up, E_down = energy_calculator(i,j)
                         if E_up!=E_down:
-                            rule = decohere_by_energy(E_up,E_down)
+                            new_state = 1 if E_up<E_down else -1
                         else:
-                            rule = decohere_by_random
-                        _break_entanglement(self[i][j], rule)
+                            new_state = 1 if random.random()<=0.5 else -1
+                        _break_entanglement(self[i][j], new_state)
                 if self[i][j].pairing:
                     self[i][j].bell_state_time+=1
 
 
-# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-
-
-import sys
-
-class ProgressBar(object):
-    
-    def __init__(self, length=20):
-        self.length = length
-        self.current = None
-        
-    def printout(self, percent):
-        bar = "="*int(round(percent*self.length))
-        if self.current!=bar:
-            form = "\r[%-"+str(self.length)+"s]"
-            sys.stdout.write(form % bar)
-            sys.stdout.flush()
-            self.current = bar
-
-
-# - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+# Iterator Function Utilities - - - - - - - - - - - - - -
 
 
 def _seed_adjacent_bell_states(number, g):
@@ -464,7 +723,7 @@ def _seed_adjacent_bell_states(number, g):
             j = random.randint(0,g.shape[0]-1)
 
             chosen = g[i][j]
-            if chosen.state is None
+            if chosen.state is None:
                 indeces = list(g._get_neighbor_indeces(i,j))
                 c = random.choice((0,1,2,3))
                 k,p = indeces[c]
@@ -482,7 +741,7 @@ def _seed_seperated_bell_states(number, g):
             j = random.randint(0,g.shape[0]-1)
 
             chosen = g[i][j]
-            if chosen.state is None
+            if chosen.state is None:
                 other=None
                 while not other and other.state is None:
                     k = random.randint(0,g.shape[1]-1)
@@ -512,7 +771,9 @@ def iterate(N, max_vel_temp, tau, interaction, movement=None, decoherence='Yes',
     ED=np.zeros(N)
 
     if input_gas==None:
-        g=QuantumGas(gas_shape[0],gas_shape[1], temperature)
+        g = QuantumGas(gas_shape[0],gas_shape[1], temperature)
+    else:
+        g = input_gas
 
     if seed_bell_states=='adjacent':
         _seed_adjacent_bell_states(number_seeded_bell_states, g)
@@ -582,7 +843,7 @@ def iterate(N, max_vel_temp, tau, interaction, movement=None, decoherence='Yes',
         M[i] = g.magnitization
         M_2[i] = (g.magnitization)**2.
         ED[i] = g.entanglement_density()
-    
+
     return g, I, E, E_2, M, M_2, ED
 
 
@@ -609,7 +870,8 @@ def temperature_iteration(T_i, T_f, N_Temps, N, max_vel_temp, tau, interaction, 
     elif seed_bell_states=='separated':
         _seed_seperated_bell_states(number_seeded_bell_states, g)
 
-    pb = ProgressBar(20)
+    pb = ProgressBar(50)
+    pb.printout(0)
     for i in range(len(T)):
         g.temp=T[i]
 
@@ -625,7 +887,7 @@ def temperature_iteration(T_i, T_f, N_Temps, N, max_vel_temp, tau, interaction, 
                   'decoherence_type':decoherence_type,
                   'input_gas':g}
 
-        g,I,EI,E_2I,MI,M_2I,EDI = Iterate(*args,**kwargs)
+        g,I,EI,E_2I,MI,M_2I,EDI = iterate(*args,**kwargs)
         E[i] = np.average(EI)
         CV[i] = (1./((float(T[i]))**2.))*(np.average(E_2I)-((np.average(EI))**2.))
         M[i]=np.average(MI)
